@@ -11,59 +11,108 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
 // ==/UserScript==
-
+var SIZE;
+var waitCount = 0;
+var downloadCounter = 0;
+const downloadStatus = document.createElement("li");
 (function() {
     const charLimit = 64;
     'use strict';
-    var SIZE;
 
 
-    function init(){
+
+    async function init(){
+        var galleryRES;
         if(document.getElementsByClassName("media-gallery").length === 0){
-            return;
+
+            if(document.querySelector(".top-matter").getElementsByClassName("collapsed").length === 0){
+                return;
+            }
+            else{
+                document.querySelector(".top-matter").querySelector(".expando-button").click();
+            }
+            if(document.getElementsByClassName("res-gallery").length === 0){
+                await waitForElement(".res-gallery");
+            }
+            if(document.getElementsByClassName("res-expando-box").length === 0){
+                return;
+            }
+            else{
+                galleryRES = true;
+            }
         }
-        const DLButton = document.createElement("button");
-        DLButton.textContent = "Download";
+        else{
+            galleryRES = false;
+        }
+        const DLButton = document.createElement("a");
+        const DLHolder = document.createElement("li");
+        DLHolder.append(DLButton);
+        DLButton.textContent = "download";
+        DLButton.href = "javascript: void 0;";
         let attachPoint = document.querySelector("div.top-matter").querySelector("ul.flat-list");
         if(!attachPoint){
             return;
         }
-        attachPoint.appendChild(DLButton);
 
         var title = document.querySelector("a.title").textContent;
         const originalTitle = title;
-
         const illegalChars = ["<",">",":","\"","\\","/","|","?","*"];
         for (let i = 0; i < illegalChars.length; i++){
             title = title.replaceAll(illegalChars[i]," ");
         }
 
         title = title.substring(0, charLimit);
+        if(galleryRES){
+            var filmstrip = document.querySelector(".res-gallery-to-filmstrip");
+            SIZE = document.querySelector(".res-step-progress").textContent.split("of")[1].trim();
+            if (filmstrip){
+                filmstrip.click();
+            }
 
-
-        SIZE = document.getElementsByClassName("gallery-preview").length;
+            await waitForNthElement(".res-image",SIZE);
+        }
+        else{
+            SIZE = document.getElementsByClassName("gallery-preview").length;
+        }
 
         const gallery = [];
         gallery.length = SIZE;
         let i = 0;
         let j = 0;
         let textFile = originalTitle + "\n";
-        for (let file of document.getElementsByClassName("gallery-preview")){
-            let preview = file.querySelector("img.preview").src;
-            let img = preview.replace("preview", "i");
-            img = img.substring(0, img.indexOf("?"));
-            gallery[i] = [img, formatting(i.toString(), SIZE)];
-            if(file.querySelector("div.gallery-item-caption")!=null){
-                let txt = file.querySelector("div.gallery-item-caption").textContent.trim();
-                textFile = textFile + i + "   " + txt + "\n";
-                j++;
+        if(galleryRES){
+            for (let file of document.querySelector(".res-gallery-pieces").children){
+                let img = file.querySelector(".res-image-media").src;
+
+                gallery[i] = [img, formatting(i.toString(), SIZE)];
+                if(file.querySelector(".res-caption")!=null){
+                    let txt = file.querySelector(".res-caption").textContent.trim();
+                    textFile = textFile + i + "   " + txt + "\n";
+                    j++;
+                }
+                i++;
+
             }
-            i++;
-
         }
+        else{
+            for (let file of document.getElementsByClassName("gallery-preview")){
+                let preview = file.querySelector("img.preview").src;
+                let img = preview.replace("preview", "i");
+                img = img.substring(0, img.indexOf("?"));
+                gallery[i] = [img, formatting(i.toString(), SIZE)];
+                if(file.querySelector("div.gallery-item-caption")!=null){
+                    let txt = file.querySelector("div.gallery-item-caption").textContent.trim();
+                    textFile = textFile + i + "   " + txt + "\n";
+                    j++;
+                }
+                i++;
 
+            }
+        }
+        attachPoint.appendChild(DLHolder);
         DLButton.addEventListener("click", async () => {
             try {
+                attachPoint.append(downloadStatus);
                 if(j==0){
                     await imgDownload(gallery, null, title);
                 }
@@ -88,10 +137,13 @@
     }
 
     async function imgDownload(gal, file, title) {
+
         const zip = new JSZip();
         const fullTitle = title + ".zip";
 
         for(let i = 0; i < SIZE; i++){
+            downloadCounter++;
+            downloadStatus.textContent = "Preparing image "+downloadCounter+" of "+SIZE+"...";
             const item = gal[i];
             const url = item[0];
             const name = item[1];
@@ -108,16 +160,19 @@
 
         }
         if(file!=null){
+            downloadStatus.textContent = "Preparing captions.txt...";
             zip.file("captions.txt", file);
         }
+        downloadStatus.textContent = "Preparing zip file...";
         const zipBlob = await zip.generateAsync({ type: "blob", useWebWorkers: false });
         const zipUrl = URL.createObjectURL(zipBlob);
-
+        downloadStatus.textContent = "Downloading zip file...";
         GM_download({
             url: zipUrl,
             name: fullTitle,
             onload: () => URL.revokeObjectURL(zipUrl)
         });
+        downloadStatus.textContent = "Download complete!";
     }
     function fetchAsBlob(url) {
         return new Promise((resolve, reject) => {
@@ -154,3 +209,44 @@
 
 })();
 
+function waitForNthElement(selector, num){
+    return new Promise(resolve => {
+        var element = document.querySelector(selector);
+        if(document.querySelectorAll(selector).length==num){
+            resolve(element);
+            return;
+        }
+        var observer = new MutationObserver(() => {
+            if(document.querySelectorAll(selector).length==num){
+                observer.disconnect();
+                resolve(element);
+            }
+        });
+        observer.observe(document.body,{
+            childList:true,
+            subtree:true
+        });
+    });
+}
+
+function waitForElement(selector) {
+    return new Promise(resolve => {
+        var element = document.querySelector(selector);
+        if (element) {
+            resolve(element);
+            return;
+        }
+        var observer = new MutationObserver(() => {
+            var element = document.querySelector(selector);
+            if (element) {
+                observer.disconnect();
+                resolve(element);
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    });
+}
